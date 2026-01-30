@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Scam Detector Test",
+  "version": "0.6",
+  "permissions": ["tabs", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  }
+}
