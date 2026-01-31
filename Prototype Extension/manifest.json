@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "SureShop - Shopee Security Scanner",
+  "description": "Protect yourself from scams on Shopee by analyzing seller authenticity, reviews, and risk factors.",
+  "version": "0.2",
+  "permissions": [
+    "tabs",
+    "activeTab",
+    "scripting",
+    "storage",
+    "webNavigation"
+  ],
+  "host_permissions": [
+    "https://shopee.ph/*",
+    "http://localhost/*"
+  ],
+  "icons": {
+    "16": "sureshop logo ver1.png",
+    "32": "sureshop logo ver1.png",
+    "48": "sureshop logo ver1.png",
+    "128": "sureshop logo ver1.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://shopee.ph/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "SureShop - Scan for scams"
+  }
+}

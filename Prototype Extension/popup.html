@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+  <head>
+        <meta charset="UTF-8">
+    <title>SureShop</title>
+    <link rel="stylesheet" href="popup.css">
+    <link rel="stylesheet" href="popup.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  </head>
+  <body>
+    <!-- Header Section -->
+    <div class="header">
+      <div class="logo">
+        <i class="fas fa-shield-alt"></i>
+        <h2>SureShop</h2>
+      </div>
+      <div class="subtitle">Shopee Security Scanner</div>
+    </div>
+
+    <!-- Activation Section -->
+    <div id="activationSection">
+      <h3><i class="fas fa-key"></i> Activate Extension</h3>
+      <p>Enter your activation key to start protecting yourself from Shopee scams</p>
+      <input id="activationKey" placeholder="Enter activation key" />
+      <button id="activateBtn"><i class="fas fa-unlock"></i> Activate</button>
+    </div>
+
+    <!-- Scan Section -->
+    <div id="scanSection" style="display:none;">
+      <div class="scan-section">
+        <button id="scanBtn"><i class="fas fa-shield-alt"></i> Scan Product</button>
+      </div>
+      <div class="output-container">
+        <pre id="output"></pre>
+      </div>
+      <div class="footer">
+        <small>© 2026 SureShop - Stay Safe Online</small>
+      </div>
+    </div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
