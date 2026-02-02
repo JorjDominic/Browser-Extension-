@@ -12,7 +12,9 @@
   ],
   "host_permissions": [
     "https://shopee.ph/*",
-    "http://localhost/*"
+    "http://localhost/*",
+    "https://*/*",
+    "http://*/*"
   ],
   "icons": {
     "16": "sureshop logo ver1.png",
@@ -24,6 +26,11 @@
     {
       "matches": ["https://shopee.ph/*"],
       "js": ["content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["universal_content.js"],
       "run_at": "document_idle"
     }
   ],
