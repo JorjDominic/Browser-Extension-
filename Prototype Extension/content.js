@@ -152,14 +152,14 @@ function showScanCard() {
   document.body.appendChild(card);
 
   card.querySelector(".close").onclick = () => {
-    card.classList.add('dismissing');
+    card.classList.add("dismissing");
     setTimeout(() => card.remove(), 250);
   };
 
   // Auto-dismiss after 7 seconds with smooth animation
   setTimeout(() => {
     if (document.getElementById("sureshopph-scan-card")) {
-      card.classList.add('dismissing');
+      card.classList.add("dismissing");
       setTimeout(() => card.remove(), 250);
     }
   }, 7000);
@@ -169,9 +169,8 @@ function showScanCard() {
   function checkAndShowCard() {
     const isProductPage = /-i\.\d+\.\d+/.test(location.href);
     if (isProductPage) {
-      setTimeout(() => {
-        showScanCard();
-      }, 1000); // Small delay to ensure page is loaded
+      console.log("Product page detected, showing scan card");
+      showScanCard();
     }
   }
 
@@ -193,11 +192,9 @@ function showScanCard() {
 
   setInterval(() => {
     if (location.href !== lastUrl) {
+      console.log("URL changed (SPA):", lastUrl, "→", location.href);
       lastUrl = location.href;
       dataStale = true;
-      console.log("ScamGuard: page changed");
-      
-      // Show card when navigating to a new page
       checkAndShowCard();
       
       const isProductPage = /-i\.\d+\.\d+/.test(location.href);
@@ -230,16 +227,12 @@ function showScanCard() {
       .filter(t => t && t.includes("₱"));
 
     for (const t of candidates) {
-      if (
-        /₱\s*\d+/.test(t) &&
-        !/voucher|min|discount|off/i.test(t)
-      ) {
-        return {
-          raw: cleanText(t),
-          value: normalizeNumber(t),
-          currency: "PHP",
-          confidence: "high"
-        };
+      const match = t.match(/₱([\d,.]+)/);
+      if (match) {
+        const price = parseFloat(match[1].replace(/,/g, ""));
+        if (price > 10 && price < 1000000) {
+          return { value: price, confidence: "high" };
+        }
       }
     }
 
@@ -325,66 +318,52 @@ function showScanCard() {
       '[data-testid*="seller"] span',
       '[data-testid*="shop"] span'
     ];
-
-    // Try direct selectors first
-    for (const selector of sellerSelectors) {
-      try {
-        const element = document.querySelector(selector);
-        if (element) {
-          const name = element.innerText?.trim();
-          if (name && isValidShopName(name)) {
-            return { value: name, confidence: "high" };
-          }
-        }
-      } catch (e) {
-        // Skip invalid selectors
-        continue;
-      }
-    }
-
-    // Strategy 2: Search for seller name in text patterns
-    const bodyText = document.body.innerText;
     
-    // Look for "Sold by [Name]" pattern
-    const soldByMatch = bodyText.match(/Sold by\s+([^|\n\r]+)/i);
-    if (soldByMatch) {
-      const name = soldByMatch[1].trim();
-      if (isValidShopName(name)) {
-        return { value: name, confidence: "high" };
+    for (const selector of sellerSelectors) {
+      const elements = document.querySelectorAll(selector);
+      for (const element of elements) {
+        const text = cleanText(element.textContent);
+        if (text && isValidShopName(text)) {
+          return { value: text, confidence: "high" };
+        }
       }
     }
 
-    // Look for "Shop: [Name]" pattern
-    const shopMatch = bodyText.match(/Shop:\s*([^|\n\r]+)/i);
-    if (shopMatch) {
-      const name = shopMatch[1].trim();
-      if (isValidShopName(name)) {
-        return { value: name, confidence: "high" };
+    // Strategy 2: Search for "Visit Shop" or similar links
+    const shopLinks = [...document.querySelectorAll('a')]
+      .filter(a => /visit.shop|go.to.shop|seller.profile/i.test(a.textContent) || 
+                   /shop|seller/i.test(a.getAttribute('title') || ''));
+    
+    for (const link of shopLinks) {
+      const parentText = cleanText(link.parentElement?.textContent || '');
+      const words = parentText.split(/\s+/).filter(w => 
+        w.length > 2 && 
+        !/visit|shop|profile|go|to|the/i.test(w)
+      );
+      
+      if (words.length > 0) {
+        const candidate = words[0];
+        if (isValidShopName(candidate)) {
+          return { value: candidate, confidence: "medium" };
+        }
       }
     }
 
-    // Strategy 3: Look near chat/contact buttons for seller info
-    const contactElements = [...document.querySelectorAll('*')].filter(el => {
-      const text = el.innerText?.toLowerCase() || '';
-      return (text.includes('chat') || text.includes('message') || text.includes('contact')) && 
-             el.innerText.length < 100; // Avoid large content blocks
-    });
+    // Strategy 3: Look near common text patterns
+    const text = document.body.innerText;
+    const patterns = [
+      /Shop:\s*([^\n]+)/i,
+      /Seller:\s*([^\n]+)/i,
+      /Store:\s*([^\n]+)/i,
+      /by\s+([A-Za-z0-9_\-\.]{3,})/i
+    ];
 
-    for (const element of contactElements) {
-      // Look for seller name in parent containers
-      const container = element.closest('div, section, article');
-      if (container) {
-        const textContent = container.innerText;
-        // Look for potential seller names (words that aren't common UI text)
-        const words = textContent.split(/\s+/).filter(word => 
-          word.length > 2 && 
-          !/^(chat|message|contact|now|seller|shop|view|follow)$/i.test(word)
-        );
-        
-        for (const word of words) {
-          if (isValidShopName(word)) {
-            return { value: word, confidence: "medium" };
-          }
+    for (const pattern of patterns) {
+      const match = text.match(pattern);
+      if (match) {
+        const candidate = cleanText(match[1]);
+        if (candidate && isValidShopName(candidate)) {
+          return { value: candidate, confidence: "medium" };
         }
       }
     }
@@ -393,133 +372,113 @@ function showScanCard() {
   }
 
   function extractProfileUrl() {
-    // Strategy 1: Look for actual shop/seller profile links
+    // Look for shop/seller profile URLs
     const profileSelectors = [
-      'a[href*="/seller/"]',
-      'a[href*="/shop/"]', 
-      'a[href*="/store/"]',
-      'a[href*="seller_id="]',
-      'a[href*="shop_id="]'
+      'a[href*="/shop/"]',
+      'a[href*="/seller/"]', 
+      'a[href*="shopee.ph/shop"]',
+      'a[title*="shop" i]',
+      'a[title*="seller" i]'
     ];
 
     for (const selector of profileSelectors) {
       const links = document.querySelectorAll(selector);
       for (const link of links) {
-        const href = link.href;
-        // Validate it's actually a profile/shop URL
-        if (href && (href.includes('/shop/') || href.includes('/seller/') || href.includes('/store/'))) {
-          // Make sure it's not just a product URL
-          if (!href.includes('/product/') && !href.includes('/item/')) {
-            return href;
+        const href = link.getAttribute('href');
+        if (href && (href.includes('/shop/') || href.includes('/seller/'))) {
+          let fullUrl = href;
+          if (href.startsWith('/')) {
+            fullUrl = `https://shopee.ph${href}`;
           }
+          return { value: fullUrl, confidence: "high" };
         }
       }
     }
 
-    // Strategy 2: Look for profile links in seller info sections
-    const sellerSections = [...document.querySelectorAll('div, section')].filter(el => {
-      const text = el.innerText?.toLowerCase() || '';
-      return text.includes('seller') || text.includes('shop') || text.includes('store');
-    });
+    // Look for links with shop-related text
+    const shopLinks = [...document.querySelectorAll('a')]
+      .filter(link => {
+        const text = link.textContent.toLowerCase();
+        const title = (link.getAttribute('title') || '').toLowerCase();
+        return text.includes('shop') || text.includes('seller') || 
+               title.includes('shop') || title.includes('seller');
+      });
 
-    for (const section of sellerSections) {
-      const links = section.querySelectorAll('a[href]');
-      for (const link of links) {
-        const href = link.href;
-        if (href && (href.includes('seller') || href.includes('shop') || href.includes('store'))) {
-          return href;
-        }
+    for (const link of shopLinks) {
+      const href = link.getAttribute('href');
+      if (href && href.includes('shopee.ph')) {
+        return { value: href, confidence: "medium" };
       }
     }
 
-    // Strategy 3: Extract from page data or scripts
-    try {
-      // Look for seller/shop data in page scripts
-      const scripts = document.querySelectorAll('script');
-      for (const script of scripts) {
-        const content = script.textContent || '';
-        const shopMatch = content.match(/"shop_id["\s]*:\s*["\s]*(\d+)/i);
-        const sellerMatch = content.match(/"seller_id["\s]*:\s*["\s]*(\d+)/i);
-        
-        if (shopMatch) {
-          return `https://shopee.ph/shop/${shopMatch[1]}`;
-        }
-        if (sellerMatch) {
-          return `https://shopee.ph/seller/${sellerMatch[1]}`;
-        }
-      }
-    } catch (e) {
-      // Ignore script parsing errors
-    }
-
-    return null;
+    return { value: null, confidence: "low" };
   }
 
   function isValidShopName(name) {
-    if (!name || typeof name !== 'string') return false;
+    if (!name || name.length < 2) return false;
     
-    name = name.trim();
-    
-    // Filter out common UI elements and invalid names
-    const invalidPatterns = [
-      /^(chat|view|shop|follow|share|skip to|main content|seller|store|contact|message|now|official|verified)$/i,
-      /^\d+$/, // Just numbers
-      /^[^\w\s]+$/, // Only special characters  
-      /^.{0,2}$/, // Too short
-      /^.{51,}$/, // Too long
-      /^(www\.|http|\.com|\.ph)/i, // URLs
-      /^[\d\s\-\(\)\+]+$/ // Phone numbers
+    // Filter out common UI text
+    const invalidNames = [
+      'shop', 'seller', 'visit', 'profile', 'page', 'store',
+      'home', 'back', 'next', 'prev', 'more', 'less', 'view',
+      'click', 'here', 'link', 'button', 'menu', 'nav', 'footer'
     ];
-
-    return !invalidPatterns.some(pattern => pattern.test(name));
+    
+    return !invalidNames.includes(name.toLowerCase()) && 
+           !/^\d+$/.test(name) && // Not just numbers
+           name.length <= 50; // Reasonable length
   }
 
   function extractProductImageCount() {
-    return document.querySelectorAll(
-      "img[src*='shopee'], img[data-src*='shopee']"
-    ).length;
+    const images = document.querySelectorAll('img[src*="shopee"], img[data-src*="shopee"]');
+    return { value: images.length, confidence: "medium" };
   }
 
   // ===============================
   // Main Extraction (FIXED - No Comments)
   // ===============================
   function extractShopeeData() {
-    const titleEl = document.querySelector("h1");
-    if (!titleEl) return { error: "Not a Shopee product page" };
-
+    console.log("Extracting Shopee data...");
+    
+    const price = extractMainPrice();
+    const sold = extractSoldCount();
     const ratings = extractRatings();
+    const responseRate = extractResponseRate();
+    const shopAge = extractShopAge();
+    const sellerName = extractSellerName();
+    const profileUrl = extractProfileUrl();
+    const imageCount = extractProductImageCount();
 
     return {
-      platform: "Shopee",
-      url: location.href,
-
-      product: {
-        title: cleanText(titleEl.innerText),
-        price: extractMainPrice(),
-        sold_count: extractSoldCount(),
-        image_count: extractProductImageCount(),
-        availability: /sold out/i.test(document.body.innerText)
-          ? "out_of_stock"
-          : "unknown"
-      },
-
-      seller: {
-        name: extractSellerName(),
-        rating: ratings.rating,
-        rating_count: ratings.rating_count,
-        response_rate: extractResponseRate(),
-        shop_age: extractShopAge(),
-        profile_url: extractProfileUrl()
-      },
-
+      success: true,
+      product_name: cleanText(document.title) || "Unknown Product",
+      price: price.value,
+      sold_count: sold.value,
+      rating: ratings.rating.value,
+      rating_count: ratings.rating_count.value,
+      response_rate: responseRate.value,
+      shop_age: shopAge.value,
+      seller_name: sellerName.value,
+      profile_url: profileUrl.value,
+      image_count: imageCount.value,
       extracted_at: new Date().toISOString()
     };
   }
 
   // ===============================
-  // Messaging
+  // Messaging - FIXED TO HANDLE EXTRACT_DATA
   // ===============================
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    console.log("Content script received message:", message.type);
+    
+    if (message.type === "EXTRACT_DATA") {
+      console.log("Handling EXTRACT_DATA message");
+      const data = extractShopeeData();
+      console.log("Extracted data:", data);
+      sendResponse(data);
+      return true;
+    }
+
     if (message.type === "COLLECT_PAGE_DATA") {
       latestData = extractShopeeData();
       dataStale = false;
@@ -531,5 +490,8 @@ function showScanCard() {
       sendResponse({ stale: dataStale, data: latestData });
       return true;
     }
+
+    console.log("Unknown message type:", message.type);
+    return false;
   });
 })();

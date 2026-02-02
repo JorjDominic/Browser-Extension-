@@ -6,15 +6,48 @@ const activateBtn = document.getElementById("activateBtn");
 const activationKeyInput = document.getElementById("activationKey");
 
 // On popup open: decide which UI to show
-chrome.storage.local.get("accessToken", ({ accessToken }) => {
+chrome.storage.local.get(["accessToken"], ({ accessToken }) => {
   if (accessToken) {
     activationSection.style.display = "none";
     scanSection.style.display = "block";
+    
+    // Check for automatic scan results on popup open - ONLY PRODUCT SCANS
+    checkForAutoScanResults();
   } else {
     activationSection.style.display = "block";
     scanSection.style.display = "none";
   }
 });
+
+function checkForAutoScanResults() {
+  // Check if there are recent auto-scan results to display - ONLY PRODUCT SCANS
+  chrome.storage.local.get("lastAutoScanResult", ({ lastAutoScanResult }) => {
+    if (lastAutoScanResult && isRecentResult(lastAutoScanResult.timestamp)) {
+      console.log("Found recent auto-scan result:", lastAutoScanResult);
+      
+      // ONLY show PRODUCT scan results in the extension popup
+      if (lastAutoScanResult.type === "product") {
+        console.log("Displaying product scan result");
+        showRiskAssessment(
+          lastAutoScanResult.risk_score, 
+          lastAutoScanResult.risk_level
+        );
+      } else {
+        console.log("Ignoring non-product scan result in extension popup:", lastAutoScanResult.type);
+        // Don't show URL scan results in the extension popup
+        // URL scan results are shown in the universal popup on the webpage
+      }
+    } else {
+      console.log("No recent product scan results found");
+    }
+  });
+}
+
+function isRecentResult(timestamp) {
+  const now = Date.now();
+  const fiveMinutes = 5 * 60 * 1000;
+  return (now - timestamp) < fiveMinutes;
+}
 
 // Handle activation (ONE TIME) - Updated with better error handling
 activateBtn.addEventListener("click", async () => {
@@ -47,43 +80,49 @@ activateBtn.addEventListener("click", async () => {
     console.log("Response headers:", [...res.headers.entries()]);
 
     if (!res.ok) {
-      const errorText = await res.text();
-      console.error("Server error:", errorText);
-      throw new Error(`Server responded with ${res.status}: ${errorText}`);
+      throw new Error(`HTTP error! status: ${res.status}`);
     }
 
     const responseData = await res.json();
     console.log("Response data:", responseData);
 
     // Check for different possible field names
-    const accessToken = responseData.access_token || 
-                       responseData.accessToken || 
-                       responseData.token ||
-                       responseData.access_key;
-
-    if (!accessToken) {
-      console.error("No access token in response:", responseData);
-      throw new Error("No access token received from server");
+    let accessToken = null;
+    
+    if (responseData.access_token) {
+      accessToken = responseData.access_token;
+    } else if (responseData.accessToken) {
+      accessToken = responseData.accessToken;
+    } else if (responseData.token) {
+      accessToken = responseData.token;
     }
 
-    await chrome.storage.local.set({ accessToken: accessToken });
-    console.log("Token saved successfully");
-
-    activationSection.style.display = "none";
-    scanSection.style.display = "block";
-    
-    alert("Extension activated successfully!");
+    if (accessToken) {
+      console.log("Access token found, storing...");
+      await chrome.storage.local.set({ 
+        accessToken: accessToken,
+        activatedAt: Date.now()
+      });
+      
+      activationSection.style.display = "none";
+      scanSection.style.display = "block";
+      
+      alert("Extension activated successfully!");
+    } else {
+      console.error("No access token in response:", responseData);
+      alert("Invalid activation key or server error");
+    }
 
   } catch (error) {
     console.error("Activation error:", error);
-    alert(`Activation failed: ${error.message}`);
+    alert("Failed to activate extension. Please check your connection and try again.");
   } finally {
     activateBtn.textContent = "Activate";
     activateBtn.disabled = false;
   }
 });
 
-// Clean function to show only risk assessment - COMPLETELY FIXED
+// Clean function to show only PRODUCT risk assessment
 function showRiskAssessment(riskScore, riskLevel) {
   const timestamp = new Date().toLocaleString('en-US', {
     year: 'numeric',
@@ -93,21 +132,15 @@ function showRiskAssessment(riskScore, riskLevel) {
     minute: '2-digit'
   });
   
-  // Determine risk color and icon
-  let riskColor, riskIcon, riskMessage;
+  // Determine risk message for PRODUCTS
+  let riskMessage;
   
   if (riskLevel === 'High') {
-    riskColor = '#dc2626';
-    riskIcon = '';
-    riskMessage = 'High risk detected! Exercise extreme caution.';
+    riskMessage = 'This product appears risky. Exercise extreme caution and consider avoiding this purchase.';
   } else if (riskLevel === 'Medium') {
-    riskColor = '#f59e0b';
-    riskIcon = '';
-    riskMessage = 'Moderate risk detected. Proceed with caution.';
+    riskMessage = 'This product has some risk factors. Please review carefully before purchasing.';
   } else {
-    riskColor = '#16a34a';
-    riskIcon = '';
-    riskMessage = 'Low risk detected. Appears safe to proceed.';
+    riskMessage = 'This product appears to be relatively safe based on current analysis.';
   }
 
   // Clear the output completely and create clean HTML
@@ -125,153 +158,171 @@ function showRiskAssessment(riskScore, riskLevel) {
     box-shadow: none;
     border: none;
   `;
- container.innerHTML = `
-  <div class="result-card">
+  
+  container.innerHTML = `
+    <div class="result-card">
+      <div style="background: linear-gradient(135deg, var(--dash-success) 0%, rgba(34, 197, 94, 0.05) 100%); border: 1px solid rgba(34, 197, 94, 0.2); border-radius: 6px; padding: 6px 10px; margin-bottom: 12px; font-size: 10px; color: var(--dash-success); text-align: center; display: flex; align-items: center; justify-content: center; gap: 6px;">
+        <i class="fas fa-shield-alt"></i> PRODUCT SCANNED
+      </div>
 
-    <div class="risk-badge risk-${riskLevel.toLowerCase()}"></div>
+      <div class="risk-badge risk-${riskLevel.toLowerCase()}"></div>
 
-    <div class="risk-level-text risk-${riskLevel.toLowerCase()}">
-      RISK LEVEL: ${riskLevel}
+      <div class="risk-level-text risk-${riskLevel.toLowerCase()}">
+        PRODUCT RISK: ${riskLevel.toUpperCase()}
+      </div>
+
+      <div class="risk-score-text">
+        Risk Score: ${riskScore} / 100
+      </div>
+
+      <div class="risk-message">
+        ${riskMessage}
+      </div>
+
+      <div class="scan-time">
+        Scanned: ${timestamp}
+      </div>
     </div>
-
-    <div class="risk-score-text">
-      Risk Score: ${riskScore} / 100
-    </div>
-
-    <div class="risk-message">
-      ${riskMessage}
-    </div>
-
-    <div class="scan-time">
-      Scanned: ${timestamp}
-    </div>
-
-  </div>
-`;
-
+  `;
   
   output.appendChild(container);
 }
 
-// Manual scan
-scanBtn.addEventListener("click", () => {
+// Enhanced manual scan function - PRODUCTS ONLY
+function performScan(isAutomatic = false) {
   chrome.storage.local.get("accessToken", ({ accessToken }) => {
     if (!accessToken) {
-      output.textContent = "❌ Extension not activated.";
+      output.textContent = "❌ Extension not activated. Please enter your activation key.";
       return;
     }
 
-    output.textContent = "🔍 Scanning Shopee page...\nAnalyzing seller data...";
-    scanBtn.textContent = "Scanning...";
+    scanBtn.textContent = isAutomatic ? "🔄 Auto-scanning..." : "🔄 Scanning...";
     scanBtn.disabled = true;
+    output.textContent = "🔍 Collecting product information...";
 
-    chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
-      console.log("Current tab:", tab);
-      
-      if (!tab || !tab.url.includes("shopee.")) {
-        output.textContent = "❌ Not a Shopee page.\nPlease navigate to a product page.";
+    // Get current tab
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (!tabs[0]) {
+        output.textContent = "❌ Unable to access current tab.";
         resetButton();
         return;
       }
 
-      console.log("Sending message to content script...");
-      
-      // First, try to inject the content script
-      chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        files: ["content.js"]
-      }).then(() => {
-        console.log("Content script injected successfully");
-        
-        // Small delay to ensure content script is ready
-        setTimeout(() => {
-          chrome.tabs.sendMessage(
-            tab.id,
-            { type: "COLLECT_PAGE_DATA" },
-            response => {
-              console.log("Response from content script:", response);
-              resetButton();
+      const currentTab = tabs[0];
+      console.log("Current tab URL:", currentTab.url);
 
-              if (chrome.runtime.lastError) {
-                console.error("Runtime error:", chrome.runtime.lastError);
-                output.textContent = "❌ Content script error:\n" + chrome.runtime.lastError.message;
-                return;
-              }
+      // Check if it's a Shopee product page
+      if (!currentTab.url.includes("shopee.ph")) {
+        output.textContent = "❌ This extension only works on Shopee product pages.";
+        resetButton();
+        return;
+      }
 
-              if (!response) {
-                output.textContent = "❌ No response from content script.\nTry reloading the page.";
-                return;
-              }
+      if (!/-i\.\d+\.\d+/.test(currentTab.url)) {
+        output.textContent = "❌ Please navigate to a specific Shopee product page to scan.";
+        resetButton();
+        return;
+      }
 
-              if (response.error) {
-                output.textContent = "❌ Content script error:\n" + response.error;
-                return;
-              }
+      // Send message to content script to extract data
+      chrome.tabs.sendMessage(
+        currentTab.id,
+        { type: "EXTRACT_DATA" },
+        async (response) => {
+          if (chrome.runtime.lastError) {
+            console.error("Message error:", chrome.runtime.lastError.message);
+            output.textContent = "❌ Unable to scan this page. Please refresh and try again.";
+            resetButton();
+            return;
+          }
 
-              // Show scanning status
-              output.textContent = "📊 Data collected. Analyzing risk...";
+          if (!response || !response.success) {
+            output.textContent = "❌ Failed to extract product data. Please try again.";
+            resetButton();
+            return;
+          }
 
-              // Enhanced server communication with detailed debugging
-              fetch("http://localhost/php/sureshopwebsite/app/controller/scan.php", {
+          console.log("Extracted data:", response);
+          console.log("Product name from extraction:", response.product_name);
+          output.textContent = "📡 Analyzing product data...";
+
+          try {
+            // Format data for scan.php (PRODUCT ENDPOINT)
+            const productData = {
+              url: currentTab.url,
+              product_name: response.product_name,
+              price: response.price,
+              sold_count: response.sold_count,
+              rating: response.rating,
+              rating_count: response.rating_count,
+              response_rate: response.response_rate,
+              shop_age: response.shop_age,
+              seller_name: response.seller_name,
+              profile_url: response.profile_url,
+              image_count: response.image_count
+            };
+
+            console.log("Product data to send to scan.php:", productData);
+
+            const scanResponse = await fetch(
+              "http://localhost/php/sureshopwebsite/app/controller/scan.php",
+              {
                 method: "POST",
                 headers: {
                   "Content-Type": "application/json",
                   "Authorization": `Bearer ${accessToken}`
                 },
-                body: JSON.stringify(response)
-              })
-              .then(async res => {
-                const text = await res.text();
-                console.log("RAW SERVER RESPONSE:", text);
-                console.log("Response status:", res.status);
-                console.log("Response headers:", [...res.headers.entries()]);
-                
-                if (!res.ok) {
-                  throw new Error(`Server responded with ${res.status}: ${text}`);
-                }
-                
-                try {
-                  return JSON.parse(text);
-                } catch (parseError) {
-                  console.error("JSON parse error:", parseError);
-                  console.error("Raw response that failed to parse:", text);
-                  throw new Error(`Invalid JSON response: ${text}`);
-                }
-              })
-              .then(result => {
-                console.log("PARSED SERVER RESULT:", result);
-                console.log("Risk score type:", typeof result.risk_score, "Value:", result.risk_score);
-                console.log("Risk level type:", typeof result.risk_level, "Value:", result.risk_level);
-                
-                // Check if the values are actually defined
-                if (result.risk_score === undefined || result.risk_level === undefined) {
-                  console.error("UNDEFINED VALUES DETECTED!");
-                  console.error("Full result object:", JSON.stringify(result, null, 2));
-                  
-                  output.textContent = `❌ ERROR: Server returned incomplete risk assessment\nFull response: ${JSON.stringify(result)}`;
-                } else {
-                  // Show only risk assessment results
-                  showRiskAssessment(result.risk_score, result.risk_level);
-                }
-              })
-              .catch((error) => {
-                console.error("Server error:", error);
-                output.textContent = `❌ Failed to analyze data: ${error.message}`;
-              });
-              
+                body: JSON.stringify(productData)
+              }
+            );
+
+            if (!scanResponse.ok) {
+              const errorText = await scanResponse.text();
+              console.error("Server error:", scanResponse.status, errorText);
+              throw new Error(`Server error: ${scanResponse.status}`);
             }
-          );
-        }, 1000);
-      }).catch(err => {
-        console.error("Script injection failed:", err);
-        output.textContent = "❌ Failed to inject content script:\n" + err.message;
-        resetButton();
-      });
+
+            const result = await scanResponse.json();
+            console.log("Scan result:", result);
+
+            if (result.risk_score !== undefined && result.risk_level !== undefined) {
+              // Store result for later retrieval
+              const storageData = {
+                lastAutoScanResult: {
+                  type: "product",
+                  risk_score: result.risk_score,
+                  risk_level: result.risk_level,
+                  timestamp: Date.now(),
+                  url: currentTab.url,
+                  tabId: currentTab.id
+                }
+              };
+              
+              await chrome.storage.local.set(storageData);
+              
+              // Show results
+              showRiskAssessment(result.risk_score, result.risk_level);
+            } else {
+              output.textContent = "❌ Invalid response from server. Please try again.";
+            }
+          } catch (error) {
+            console.error("Scan failed:", error);
+            output.textContent = `❌ Scan failed: ${error.message}`;
+          } finally {
+            resetButton();
+          }
+        }
+      );
     });
   });
+}
+
+// Manual scan
+scanBtn.addEventListener("click", () => {
+  performScan(false);
 });
 
 function resetButton() {
-  scanBtn.textContent = "🛡️ Scan Product";
+  scanBtn.textContent = "🛡️ Manual Scan";
   scanBtn.disabled = false;
 }
